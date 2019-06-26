@@ -161,7 +161,7 @@ if __name__ == '__main__':
     if args.use_pretrained == True:
         logger.info('Get pre-trained model from MXNet or Gluoncv modelzoo.')
         logger.info('If you want to use custom model, please set use_pretrained = False.')
-        if args.model in ['imagenet1k-resnet-152, imagenet1k-inception-bn']:
+        if args.model in ['imagenet1k-resnet-152', 'imagenet1k-inception-bn']:
             logger.info('model %s is downloaded from MXNet modelzoo' % args.model)
             prefix, epoch = download_model(model_name=args.model, logger=logger)
         else:
