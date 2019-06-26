@@ -9,13 +9,76 @@ This folder contains examples of quantizing a FP32 model with Intel® MKL-DNN or
 
 <h2 id="1">Model Quantization with Intel® MKL-DNN</h2>
 
-Intel® MKL-DNN supports quantization with subgraph features on Intel® CPU Platform and can bring performance improvements on the [Intel® Xeon® Scalable Platform](https://www.intel.com/content/www/us/en/processors/xeon/scalable/xeon-scalable-platform.html). A new quantization script `imagenet_gen_qsym_mkldnn.py` has been designed to launch quantization for image-classification models with Intel® MKL-DNN. This script integrates with [Gluon-CV modelzoo](https://gluon-cv.mxnet.io/model_zoo/classification.html), so that more pre-trained models can be downloaded from Gluon-CV and then converted for quantization. To apply quantization flow to your project directly, please refer our instructions.
+Intel® MKL-DNN supports quantization with subgraph features on Intel® CPU Platform and can bring performance improvements on the [Intel® Xeon® Scalable Platform](https://www.intel.com/content/www/us/en/processors/xeon/scalable/xeon-scalable-platform.html). A new quantization script `imagenet_gen_qsym_mkldnn.py` has been designed to launch quantization for image-classification models with Intel® MKL-DNN. This script integrates with [Gluon-CV modelzoo](https://gluon-cv.mxnet.io/model_zoo/classification.html), so that more pre-trained models can be downloaded from Gluon-CV and then converted for quantization. To apply quantization flow to your project directly, please refer [Quantize models for production-level inference with MKL-DNN backend](https://mxnet.incubator.apache.org/tutorials/mkldnn/MKLDNN_QUANTIZATION.html).
 
-Calibration is used for generating a calibration table for the quantized symbol. The quantization script supports three methods:
+```
+usage: imagenet_gen_qsym_mkldnn.py [-h] [--model MODEL] [--epoch EPOCH]
+                                   [--no-pretrained] [--batch-size BATCH_SIZE]
+                                   [--label-name LABEL_NAME]
+                                   [--calib-dataset CALIB_DATASET]
+                                   [--image-shape IMAGE_SHAPE]
+                                   [--data-nthreads DATA_NTHREADS]
+                                   [--num-calib-batches NUM_CALIB_BATCHES]
+                                   [--exclude-first-conv] [--shuffle-dataset]
+                                   [--shuffle-chunk-seed SHUFFLE_CHUNK_SEED]
+                                   [--shuffle-seed SHUFFLE_SEED]
+                                   [--calib-mode CALIB_MODE]
+                                   [--quantized-dtype {auto,int8,uint8}]
+                                   [--enable-calib-quantize ENABLE_CALIB_QUANTIZE]
 
-- **none:** No calibration will be used. The thresholds for quantization will be calculated on the fly. This will result in inference speed slowdown and loss of accuracy in general.
-- **naive:** Simply take min and max values of layer outputs as thresholds for quantization. In general, the inference accuracy worsens with more examples used in calibration. It is recommended to use `entropy` mode as it produces more accurate inference results.
-- **entropy:** Calculate KL divergence of the fp32 output and quantized output for optimal thresholds. This mode is expected to produce the best inference accuracy of all three kinds of quantized models if the calibration dataset is representative enough of the inference dataset.
+Generate a calibrated quantized model from a FP32 model with Intel MKL-DNN
+support
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --model MODEL         model to be quantized.
+  --epoch EPOCH         number of epochs, default is 0
+  --no-pretrained       If enabled, will not download pretrained model from
+                        MXNet or Gluon-CV modelzoo.
+  --batch-size BATCH_SIZE
+  --label-name LABEL_NAME
+  --calib-dataset CALIB_DATASET
+                        path of the calibration dataset
+  --image-shape IMAGE_SHAPE
+  --data-nthreads DATA_NTHREADS
+                        number of threads for data decoding
+  --num-calib-batches NUM_CALIB_BATCHES
+                        number of batches for calibration
+  --exclude-first-conv  excluding quantizing the first conv layer since the
+                        input data may have negative value which doesn't
+                        support at moment
+  --shuffle-dataset     shuffle the calibration dataset
+  --shuffle-chunk-seed SHUFFLE_CHUNK_SEED
+                        shuffling chunk seed, see https://mxnet.incubator.apac
+                        he.org/api/python/io/io.html?highlight=imager#mxnet.io
+                        .ImageRecordIter for more details
+  --shuffle-seed SHUFFLE_SEED
+                        shuffling seed, see https://mxnet.incubator.apache.org
+                        /api/python/io/io.html?highlight=imager#mxnet.io.Image
+                        RecordIter for more details
+  --calib-mode CALIB_MODE
+                        calibration mode used for generating calibration table
+                        for the quantized symbol; supports 1. none: no
+                        calibration will be used. The thresholds for
+                        quantization will be calculated on the fly. This will
+                        result in inference speed slowdown and loss of
+                        accuracy in general. 2. naive: simply take min and max
+                        values of layer outputs as thresholds for
+                        quantization. In general, the inference accuracy
+                        worsens with more examples used in calibration. It is
+                        recommended to use `entropy` mode as it produces more
+                        accurate inference results. 3. entropy: calculate KL
+                        divergence of the fp32 output and quantized output for
+                        optimal thresholds. This mode is expected to produce
+                        the best inference accuracy of all three kinds of
+                        quantized models if the calibration dataset is
+                        representative enough of the inference dataset.
+  --quantized-dtype {auto,int8,uint8}
+                        quantization destination data type for input data
+  --enable-calib-quantize ENABLE_CALIB_QUANTIZE
+                        If enabled, the quantize op will be calibrated offline
+                        if calibration mode is enabled
+```
 
 Use the following command to install [Gluon-CV](https://gluon-cv.mxnet.io/):
 
