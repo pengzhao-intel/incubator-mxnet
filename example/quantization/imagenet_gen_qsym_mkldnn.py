@@ -147,6 +147,7 @@ if __name__ == '__main__':
     logger = logging.getLogger('logger')
     logger.setLevel(logging.INFO)
 
+    logger.info(args)
     logger.info('shuffle_dataset=%s' % args.shuffle_dataset)
 
     calib_mode = args.calib_mode
@@ -159,7 +160,7 @@ if __name__ == '__main__':
     # download model
     if args.use_pretrained == True:
         logger.info('Get pre-trained model from MXNet or Gluoncv modelzoo.')
-        logger.info('if you want to use custom model, please set use_pretrained = False.')
+        logger.info('If you want to use custom model, please set use_pretrained = False.')
         if args.model in ['imagenet1k-resnet-152, imagenet1k-inception-bn']:
             logger.info('model %s is downloaded from MXNet modelzoo' % args.model)
             prefix, epoch = download_model(model_name=args.model, logger=logger)
@@ -175,8 +176,6 @@ if __name__ == '__main__':
         epoch = args.epoch
 
     sym, arg_params, aux_params = mx.model.load_checkpoint(prefix, epoch)
-
-    sym = sym.get_backend_symbol('MKLDNN_QUANTIZE')
 
     # get batch size
     batch_size = args.batch_size
@@ -240,15 +239,17 @@ if __name__ == '__main__':
         if exclude_first_conv:
             excluded_sym_names += ['inception30_conv0_fwd']
     else:
-        logger.info('Set proper RGB configs for model %s' % args.model)
+        logger.info('Please set proper RGB configs for model %s' % args.model)
         # add rgb mean/std of your model.
         rgb_mean = '0,0,0'
         rgb_std = '0,0,0'
         # add layer names you donnot want to quantize.
-        logger.info('Set proper excluded_sym_names for model %s' % args.model)
+        logger.info('Please set proper excluded_sym_names for model %s' % args.model)
         excluded_sym_names += ['layers']
         if exclude_first_conv:
             excluded_sym_names += ['layers']
+
+    logger.info('These layers have been excluded %s' % excluded_sym_names)
 
     label_name = args.label_name
     logger.info('label_name = %s' % label_name)
@@ -267,10 +268,10 @@ if __name__ == '__main__':
     combine_mean_std.update(std_args)
     if calib_mode == 'none':
         logger.info('Quantizing FP32 model %s' % args.model)
-        qsym, qarg_params, aux_params = quantize_model(sym=sym, arg_params=arg_params, aux_params=aux_params,
-                                                       ctx=ctx, excluded_sym_names=excluded_sym_names,
-                                                       calib_mode=calib_mode, quantized_dtype=args.quantized_dtype,
-                                                       logger=logger)
+        qsym, qarg_params, aux_params = quantize_model_mkldnn(sym=sym, arg_params=arg_params, aux_params=aux_params,
+                                                              ctx=ctx, excluded_sym_names=excluded_sym_names,
+                                                              calib_mode=calib_mode, quantized_dtype=args.quantized_dtype,
+                                                              logger=logger)
         sym_name = '%s-symbol.json' % (prefix + '-quantized')
     else:
         logger.info('Creating ImageRecordIter for reading calibration dataset')
@@ -287,12 +288,12 @@ if __name__ == '__main__':
                                      seed=args.shuffle_seed,
                                      **combine_mean_std)
 
-        qsym, qarg_params, aux_params = quantize_model(sym=sym, arg_params=arg_params, aux_params=aux_params,
-                                                        ctx=ctx, excluded_sym_names=excluded_sym_names,
-                                                        calib_mode=calib_mode, calib_data=data,
-                                                        num_calib_examples=num_calib_batches * batch_size,
-                                                        calib_layer=calib_layer, quantized_dtype=args.quantized_dtype,
-                                                        label_names=(label_name,), logger=logger)
+        qsym, qarg_params, aux_params = quantize_model_mkldnn(sym=sym, arg_params=arg_params, aux_params=aux_params,
+                                                              ctx=ctx, excluded_sym_names=excluded_sym_names,
+                                                              calib_mode=calib_mode, calib_data=data,
+                                                              num_calib_examples=num_calib_batches * batch_size,
+                                                              calib_layer=calib_layer, quantized_dtype=args.quantized_dtype,
+                                                              label_names=(label_name,), logger=logger)
         if calib_mode == 'entropy':
             suffix = '-quantized-%dbatches-entropy' % num_calib_batches
         elif calib_mode == 'naive':
@@ -301,7 +302,6 @@ if __name__ == '__main__':
             raise ValueError('unknow calibration mode %s received, only supports `none`, `naive`, and `entropy`'
                              % calib_mode)
         sym_name = '%s-symbol.json' % (prefix + suffix)
-    qsym = qsym.get_backend_symbol('MKLDNN_QUANTIZE')
     save_symbol(sym_name, qsym, logger)
     param_name = '%s-%04d.params' % (prefix + '-quantized', epoch)
     save_params(param_name, qarg_params, aux_params, logger)
