@@ -9,7 +9,7 @@ This folder contains examples of quantizing a FP32 model with Intel® MKL-DNN or
 
 <h2 id="1">Model Quantization with Intel® MKL-DNN</h2>
 
-Intel® MKL-DNN supports quantization with subgraph features on Intel® CPU Platform and can bring performance improvements on the [Intel® Xeon® Scalable Platform](https://www.intel.com/content/www/us/en/processors/xeon/scalable/xeon-scalable-platform.html). A new quantization script `imagenet_gen_qsym_mkldnn.py` has been designed to launch quantization for CNN models with Intel® MKL-DNN. This script integrates with [Gluon-CV modelzoo](https://gluon-cv.mxnet.io/model_zoo/classification.html), so that more pre-trained models can be downloaded from Gluon-CV and then converted for quantization. This script also supports custom models.
+Intel® MKL-DNN supports quantization with subgraph features on Intel® CPU Platform and can bring performance improvements on the [Intel® Xeon® Scalable Platform](https://www.intel.com/content/www/us/en/processors/xeon/scalable/xeon-scalable-platform.html). A new quantization script `imagenet_gen_qsym_mkldnn.py` has been designed to launch quantization for image-classification models with Intel® MKL-DNN. This script integrates with [Gluon-CV modelzoo](https://gluon-cv.mxnet.io/model_zoo/classification.html), so that more pre-trained models can be downloaded from Gluon-CV and then converted for quantization. To apply quantization flow to your project directly, please refer our instructions.
 
 Calibration is used for generating a calibration table for the quantized symbol. The quantization script supports three methods:
 
@@ -23,12 +23,13 @@ Use the following command to install [Gluon-CV](https://gluon-cv.mxnet.io/):
 pip install gluoncv
 ```
 
-The following models have been tested on Linux systems.
+Below are some quantization demos. These models have been tested on Linux systems.
 
 | Model | Source | Dataset | FP32 Accuracy (top-1/top-5)| INT8 Accuracy (top-1/top-5)|
 |:---|:---|---|:---:|:---:|
 | [ResNet18-V1](#3)  | [Gluon-CV](https://gluon-cv.mxnet.io/model_zoo/classification.html)  | [Validation Dataset](http://data.mxnet.io/data/val_256_q90.rec)  |70.07%/89.30%|69.85%/89.23%|
 | [ResNet50-V1](#3)  | [Gluon-CV](https://gluon-cv.mxnet.io/model_zoo/classification.html)  | [Validation Dataset](http://data.mxnet.io/data/val_256_q90.rec)  | 75.87%/92.72%  |  75.71%/92.65% |
+| [ResNet50-V1b](#3)  | [Gluon-CV](https://gluon-cv.mxnet.io/model_zoo/classification.html)  | [Validation Dataset](http://data.mxnet.io/data/val_256_q90.rec)  | 76.82%/93.38% |  76.39%/93.24% |
 | [ResNet101-V1](#3)  | [Gluon-CV](https://gluon-cv.mxnet.io/model_zoo/classification.html)  | [Validation Dataset](http://data.mxnet.io/data/val_256_q90.rec)  | 77.3%/93.58%  | 77.09%/93.41%  |
 |[Squeezenet 1.0](#4)|[Gluon-CV](https://gluon-cv.mxnet.io/model_zoo/classification.html)|[Validation Dataset](http://data.mxnet.io/data/val_256_q90.rec)|57.01%/79.71%|56.62%/79.55%|
 |[MobileNet 1.0](#5)|[Gluon-CV](https://gluon-cv.mxnet.io/model_zoo/classification.html)|[Validation Dataset](http://data.mxnet.io/data/val_256_q90.rec)|69.76%/89.32%|69.61%/89.09%|
@@ -39,7 +40,7 @@ The following models have been tested on Linux systems.
 | [SSD-VGG16](#10) | [example/ssd](https://github.com/apache/incubator-mxnet/tree/master/example/ssd)  | VOC2007/2012  | 0.8366 mAP  | 0.8364 mAP  |
 | [SSD-VGG16](#10) | [example/ssd](https://github.com/apache/incubator-mxnet/tree/master/example/ssd)  | COCO2014  | 0.2552 mAP  | 0.253 mAP  |
 
-<h3 id='3'>ResNet18/50/101-V1</h3>
+<h3 id='3'>ResNetV1</h3>
 
 The following command is to download the pre-trained model from Gluon-CV and transfer it into the symbolic model which would be finally quantized. The [validation dataset](http://data.mxnet.io/data/val_256_q90.rec) is available for testing the pre-trained models:
 
@@ -47,7 +48,7 @@ The following command is to download the pre-trained model from Gluon-CV and tra
 python imagenet_gen_qsym_mkldnn.py --model=resnet50_v1 --num-calib-batches=5 --calib-mode=naive
 ```
 
-The model would be automatically replaced in fusion and quantization format. It is then saved as the quantized symbol and parameter files in the `./model` directory. The following command is to launch inference.
+The model would be automatically replaced in fusion and quantization format. It is then saved as the quantized symbol and parameter files in the `./model` directory. Set `--model` to `resnet18_v1/resnet50_v1b/resnet101_v1` to quantize other models. The following command is to launch inference.
 
 ```
 # USE MKLDNN AS SUBGRAPH BACKEND
@@ -219,17 +220,14 @@ SSD model is located in [example/ssd](https://github.com/apache/incubator-mxnet/
 This script also supports custom symbolic models. You can easily add some quantization layer configs in `imagenet_gen_qsym_mkldnn.py` like below:
 
 ```
-elif args.model == 'custom':
+else:
+    logger.info('Please set proper RGB configs for model %s' % args.model)
     # add rgb mean/std of your model.
     rgb_mean = '0,0,0'
     rgb_std = '0,0,0'
-    calib_layer = lambda name: name.endswith('_output')
     # add layer names you donnot want to quantize.
-    # add conv/pool layer names that has negative inputs
-    # since Intel® MKL-DNN only support uint8 quantization temporary.
-    # add all fc layer names since Intel® MKL-DNN does not support temporary.
+    logger.info('Please set proper excluded_sym_names for model %s' % args.model)
     excluded_sym_names += ['layers']
-    # add your first conv layer names since Intel® MKL-DNN only support uint8 quantization temporary.
     if exclude_first_conv:
         excluded_sym_names += ['layers']
 ```
@@ -247,7 +245,7 @@ export MXNET_SUBGRAPH_BACKEND=MKLDNN
 python imagenet_inference.py --symbol-file=./model/custom-symbol.json --param-file=./model/custom-0000.params --rgb-mean=* --rgb-std=* --num-skipped-batches=* --batch-size=* --num-inference-batches=*--dataset=./data/* --ctx=cpu
 ```
 
-3. Then, you should add `rgb_mean`, `rgb_std` and `excluded_sym_names` in this script. Notice that you should exclude conv/pool layers that have negative data since Intel® MKL-DNN only supports `uint8` quantization temporarily. You should also exclude all fc layers in your model.
+3. Then, you should add `rgb_mean`, `rgb_std` and `excluded_sym_names` in this script.
 
 4. Then, you can run the following command for quantization:
 
