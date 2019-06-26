@@ -168,6 +168,8 @@ qsym, qarg_params, aux_params = calib_graph(qsym=qsym, arg_params=arg_params, au
                                             quantized_dtype=quantized_dtype, logger=logger)
 # perform post-quantization fusion
 qsym = qsym.get_backend_symbol('MKLDNN_QUANTIZE')
+# (optional) visualize quantized model
+mx.viz.plot_network(qsym)
 # save quantized model
 mx.model.save_checkpoint('quantized-resnet50_v1', 0, qsym, qarg_params, aux_params)
 ```
