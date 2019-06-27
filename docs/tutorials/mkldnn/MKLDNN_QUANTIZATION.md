@@ -66,7 +66,9 @@ python imagenet_inference.py --symbol-file=./model/resnet50_v1-quantized-5batche
 
 ## Integrate Quantization Flow to Your Project
 
-It's important to note that the quantization flow only work with the symbolic MXNet API. If you're using Gluon, you can first refer [Saving and Loading Gluon Models](https://mxnet.incubator.apache.org/versions/master/tutorials/gluon/save_load_params.html) to hybridize your computation graph and export it as a symbol before running quantization.
+It's important to note that the quantization flow only work with the symbolic MXNet API. If you're using Gluon, you can first refer [Saving and Loading Gluon Models](https://mxnet.incubator.apache.org/versions/master/tutorials/gluon/save_load_params.html) to hybridize your computation graph and export it as a symbol before running quantization. The picture shows the quantization flow:
+
+![quantization flow](quantization.png)
 
 Take Gluon ResNet50 as an example.
 
@@ -98,30 +100,9 @@ sym = sym.get_backend_symbol('MKLDNN_QUANTIZE')
 ```
 It's important to add this line to enable graph fusion before quantization to get better performance.
 
-### Float32 Inference
+### Quantize Model
 
-```python
-# download imagenet validation dataset
-mx.test_utils.download('http://data.mxnet.io/data/val_256_q90.rec', 'quantization/dataset.rec')
-# set rgb info for data
-mean_std = {'mean_r': 123.68, 'mean_g': 116.779, 'mean_b': 103.939, 'std_r': 58.393, 'std_g': 57.12, 'std_b': 57.375}
-# set batch size
-batch_size = 16
-# create DataIter
-data = mx.io.ImageRecordIter(path_imgrec='quantization/dataset.rec', batch_size=batch_size, data_shape=batch_shape[1:], rand_crop=False, rand_mirror=False, **mean_std)
-# create module
-mod = mx.mod.Module(symbol=sym, label_names=None, context=mx.cpu())
-mod.bind(for_training=False, data_shapes=data.provide_data, label_shapes=None)
-mod.set_params(arg_params, aux_params)
-# forward inference
-for batch in data:
-    mod.forward(data_batch=batch, is_train=False)
-```
-You need to prepare a set of code for float32 inference in symbolic mode.
-
-### Calibration
-
-Applying quantization by calling quantization apis along with float32 inference code. Below are some descriptions for quantization apis and their params.
+Applying quantization by calling `quantiza_graph` api. Below are some descriptions for quantization apis and their params.
 
 | param              | type            | description|
 |--------------------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -130,10 +111,44 @@ Applying quantization by calling quantization apis along with float32 inference 
 | calib_layer        | function        | Given a layer's output name in string, return True or False for deciding whether to calibrate this layer.<br>If yes, the statistics of the layer's output will be collected; otherwise, no information of the layer's output will be collected.<br>If not provided, all the layers' outputs that need requantization will be collected.|
 | quantized_dtype    | str             | The quantized destination type for input data. Currently support 'int8', 'uint8' and 'auto'.<br>'auto' means automatically select output type according to calibration result.|
 
-First, you need to generate a quantized model from a FP32 model w/o calibration and a collector for naive or entropy calibration by calling `quantiza_graph` api.
+```python
+# quantize configs
+# set exclude layers
+excluded_names = []
+# set calib mode.
+calib_mode = 'none'
+# set calib_layer
+calib_layer = None
+# set quantized_dtype
+quantized_dtype = 'auto'
+logger.info('Quantizing FP32 model ResNet50-V1')
+qsym, qarg_params, aux_params, collector = quantize_graph(sym=sym, arg_params=arg_params, aux_params=aux_params,
+                                                          excluded_sym_names=excluded_names,
+                                                          calib_mode=calib_mode, calib_layer=calib_layer,
+                                                          quantized_dtype=quantized_dtype, logger=logger)
+```
+
+### Evaluate/Tune INT8 Accuracy
+
+Now, you get a pair of quantized symbol and params file, you can load them for inference. If you want to use gluon for int8 inference. You can load them as a SymbolBlock:
 
 ```python
-# exclude layers which do not need quantize
+quantized_net = mx.gluon.SymbolBlock.imports('quantized-resnet50_v1-symbol.json', 'data', 'quantized-resnet50_v1-0000.params')
+quantized_net.hybridize(static_shape=True, static_alloc=True)
+batch_size = 1
+data = mx.nd.ones((batch_size,3,224,224))
+quantized_net(data)
+```
+
+You can compare the int8 accuracy with float32. If the gap is big, you may need to exclude more layers and quantize the model again.
+
+### Calibrate Model (optional)
+
+The quantized model generated in previous steps can be very slow during inference since it will calculate min and max at runtime. We recommend using offline calibration for better performance by setting `calib_mode` to `naive` or `entropy` and then calling `set_monitor_callback` api to collect layer information with a subset of the validation datasets before int8 inference.
+
+```python
+# quantization configs
+# set exclude layers
 excluded_names = []
 # set calib mode.
 calib_mode = 'naive'
@@ -146,17 +161,12 @@ qsym, qarg_params, aux_params, collector = quantize_graph(sym=sym, arg_params=ar
                                                           excluded_sym_names=excluded_names,
                                                           calib_mode=calib_mode, calib_layer=calib_layer,
                                                           quantized_dtype=quantized_dtype, logger=logger)
-```
-
-You will get a quantized model w/o layer information and a collector for calibration. This quantized model can be very slow during inference since it will calculate min and max at runtime. We recommend using offline calibration by setting `calib_mode` to `naive` or `entropy` and then calling `set_monitor_callback` api to collect layer information before int8 inference.
-
-```python
-# set monitor to collect layer statistic information
-mod._exec_group.execs[0].set_monitor_callback(collector.collect, monitor_all=True)
+# calibration configs
 # set num_calib_batches
 num_calib_batches = 5
 max_num_examples = num_calib_batches * batch_size
-# collect layer information based on max_num_examples images
+# monitor FP32 Inference
+mod._exec_group.execs[0].set_monitor_callback(collector.collect, monitor_all=True)
 num_batches = 0
 num_examples = 0
 for batch in data:
@@ -188,15 +198,20 @@ mx.viz.plot_network(qsym)
 # save quantized model
 mx.model.save_checkpoint('quantized-resnet50_v1', 0, qsym, qarg_params, aux_params)
 ```
+### Tips for Model Calibration
 
-### INT8 Inference
+#### Accuracy Tuning
 
-Now, you get a pair of quantized symbol and params file, you can load them for inference. If you want to use gluon for int8 inference. You can load them as a SymbolBlock:
+- Try to use `entropy` calib mode;
 
-```python
-quantized_net = mx.gluon.SymbolBlock.imports('quantized-resnet50_v1-symbol.json', 'data', 'quantized-resnet50_v1-0000.params')
-quantized_net.hybridize(static_shape=True, static_alloc=True)
-batch_size = 1
-data = mx.nd.ones((batch_size,3,224,224))
-quantized_net(data)
-```
+- Try to exclude some layers which may cause obvious accuracy drop;
+
+- Change calibration dataset by setting different `num_calib_batches` or shuffle your validation dataset;
+
+#### Performance Tuning
+
+- Keep sure to perform graph fusion before quantization;
+
+- If lots of `requantize` layers exist, keep sure to perform post-quantization fusion after calibration;
+
+- Compare the MXNet profile or `MKLDNN_VERBOSE` of float32 and int8 inference;
