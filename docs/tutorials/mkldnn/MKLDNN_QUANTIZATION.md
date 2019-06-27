@@ -121,15 +121,18 @@ You need to prepare a set of code for float32 inference in symbolic mode.
 
 ### Calibration
 
-```python
-mx.test_utils.download('http://data.mxnet.io/data/val_256_q90.rec', 'dataset.rec')
-mean_std = {'mean_r': 123.68, 'mean_g': 116.779, 'mean_b': 103.939, 'std_r': 58.393, 'std_g': 57.12, 'std_b': 57.375}
-batch_size = 16
-data = mx.io.ImageRecordIter(path_imgrec='dataset.rec', batch_size=batch_size, data_shape=batch_shape[1:], rand_crop=False, rand_mirror=False, **mean_std)
-mod = mx.mod.Module(symbol=sym, label_names=None, context=mx.cpu())
-mod.bind(for_training=False, data_shapes=data.provide_data, label_shapes=None)
-mod.set_params(arg_params, aux_params)
+Applying quantization by calling quantization apis along with float32 inference code. Below are some descriptions for quantization apis and their params.
 
+| param              | type            | description|
+|--------------------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| excluded_sym_names | list of strings | A list of strings representing the names of the symbols that users want to excluding from being quantized.|
+| calib_mode         | str             | If calib_mode='none', no calibration will be used and the thresholds for requantization after the corresponding layers will be calculated at runtime by calling min  and max operators. The quantized models generated in this mode are normally 10-20% slower than those with  calibrations during inference.<br>If calib_mode='naive', the min and max values of the layer outputs from a calibration dataset will be directly taken as the thresholds for quantization.<br>If calib_mode='entropy', the thresholds for quantization will be derived such that the KL divergence between the distributions of FP32 layer outputs and  quantized layer outputs is minimized based upon the calibration dataset. |
+| calib_layer        | function        | Given a layer's output name in string, return True or False for deciding whether to calibrate this layer.<br>If yes, the statistics of the layer's output will be collected; otherwise, no information of the layer's output will be collected.<br>If not provided, all the layers' outputs that need requantization will be collected.|
+| quantized_dtype    | str             | The quantized destination type for input data. Currently support 'int8', 'uint8' and 'auto'.<br>'auto' means automatically select output type according to calibration result.|
+
+First, you need to generate a quantized model from a FP32 model w/o calibration and a collector for naive or entropy calibration by calling `quantiza_graph` api.
+
+```python
 # exclude layers which do not need quantize
 excluded_names = []
 # set calib mode.
@@ -138,17 +141,21 @@ calib_mode = 'naive'
 calib_layer = None
 # set quantized_dtype
 quantized_dtype = 'auto'
-# set num_calib_batches
-num_calib_batches = 5
-max_num_examples = num_calib_batches * batch_size
 logger.info('Quantizing FP32 model ResNet50-V1')
 qsym, qarg_params, aux_params, collector = quantize_graph(sym=sym, arg_params=arg_params, aux_params=aux_params,
                                                           excluded_sym_names=excluded_names,
                                                           calib_mode=calib_mode, calib_layer=calib_layer,
                                                           quantized_dtype=quantized_dtype, logger=logger)
+```
 
+You will get a quantized model w/o layer information and a collector for calibration. This quantized model can be very slow during inference since it will calculate min and max at runtime. We recommend using offline calibration by setting `calib_mode` to `naive` or `entropy` and then calling `set_monitor_callback` api to collect layer information before int8 inference.
+
+```python
 # set monitor to collect layer statistic information
 mod._exec_group.execs[0].set_monitor_callback(collector.collect, monitor_all=True)
+# set num_calib_batches
+num_calib_batches = 5
+max_num_examples = num_calib_batches * batch_size
 # collect layer information based on max_num_examples images
 num_batches = 0
 num_examples = 0
@@ -161,11 +168,19 @@ for batch in data:
 if logger is not None:
     logger.info("Collected statistics from %d batches with batch_size=%d"
                 % (num_batches, batch_size))
+```
+After that, layer information will be filled into the `collector` returned by `quantize_graph` api. Then, you need to write the layer information into int8 model by calling `calib_graph` api.
 
+```python
 # write scaling factor into quantized symbol
 qsym, qarg_params, aux_params = calib_graph(qsym=qsym, arg_params=arg_params, aux_params=aux_params,
                                             collector=collector, calib_mode=calib_mode,
                                             quantized_dtype=quantized_dtype, logger=logger)
+```
+
+When you get a quantized model with calibration, keep sure to call fusion api again since this can fuse some `requantize` or `dequantize` operators for further performance improvement.
+
+```python
 # perform post-quantization fusion
 qsym = qsym.get_backend_symbol('MKLDNN_QUANTIZE')
 # (optional) visualize quantized model
@@ -173,18 +188,10 @@ mx.viz.plot_network(qsym)
 # save quantized model
 mx.model.save_checkpoint('quantized-resnet50_v1', 0, qsym, qarg_params, aux_params)
 ```
-Applying quantization by inserting some lines into float32 inference code. Below are some descriptions for params of quantization api.
-
-| param              | type            | description|
-|--------------------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| excluded_sym_names | list of strings | A list of strings representing the names of the symbols that users want to excluding from being quantized.|
-| calib_mode         | str             | If calib_mode='none', no calibration will be used and the thresholds for requantization after the corresponding layers will be calculated at runtime by calling min  and max operators. The quantized models generated in this mode are normally 10-20% slower than those with  calibrations during inference.<br>If calib_mode='naive', the min and max values of the layer outputs from a calibration dataset will be directly taken as the thresholds for quantization.<br>If calib_mode='entropy', the thresholds for quantization will be derived such that the KL divergence between the distributions of FP32 layer outputs and  quantized layer outputs is minimized based upon the calibration dataset. |
-| calib_layer        | function        | Given a layer's output name in string, return True or False for deciding whether to calibrate this layer.<br>If yes, the statistics of the layer's output will be collected; otherwise, no information of the layer's output will be collected.<br>If not provided, all the layers' outputs that need requantization will be collected.|
-| quantized_dtype    | str             | The quantized destination type for input data. Currently support 'int8', 'uint8' and 'auto'.<br>'auto' means automatically select output type according to calibration result.|
 
 ### INT8 Inference
 
-Now, you have get a pair of quantized symbol and params file, you can load them to launch inference. If you want to use gluon for int8 inference. You can load them as a SymbolBlock:
+Now, you get a pair of quantized symbol and params file, you can load them for inference. If you want to use gluon for int8 inference. You can load them as a SymbolBlock:
 
 ```python
 quantized_net = mx.gluon.SymbolBlock.imports('quantized-resnet50_v1-symbol.json', 'data', 'quantized-resnet50_v1-0000.params')
