@@ -157,7 +157,7 @@ Select API:&nbsp;
     * [Importing an ONNX model into MXNet](/tutorials/onnx/super_resolution.html)
     * [Optimizing Deep Learning Computation Graphs with TensorRT](/tutorials/tensorrt/inference_with_trt.html)
     * [How to build and install MXNet with MKL-DNN backend](/tutorials/mkldnn/MKLDNN_README.html)
-    * [How to quantize models for production-level inference with MKL-DNN backend](/tutorials/mkldnn/MKLDNN_QUANTIZATION.html)
+    * [How to quantize custom models for production-level inference with MKL-DNN backend](/tutorials/mkldnn/MKLDNN_QUANTIZATION.html)
 * API Guides
     * Core APIs
         * NDArray

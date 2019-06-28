@@ -16,9 +16,9 @@
 <!--- specific language governing permissions and limitations -->
 <!--- under the License. -->
 
-# Quantize models for production-level inference with MKL-DNN backend
+# Quantize custom models for production-level inference with MKL-DNN backend
 
-The Apache MXNet* community delivered quantization approaches to improve performance and reduce the deployment costs for inference. There are two main benefits of lower precision (INT8). First, the computation can be accelerated by lower precision instruction, like VNNI. Second, lower precision data types save memory bandwidth and allow for better cache locality and power savings. The new quantization approach can realize up to a 4x performance speedup in current [AWS* EC2 c5.24xlarge instances](https://amazonaws-china.com/ec2/instance-types/c5/) with [Intel Deep Learning Boost](https://www.intel.ai/intel-deep-learning-boost/#gs.0ngn54) enabled hardware with less than 0.5% accuracy drop.
+The Apache MXNet* community delivered quantization approaches to improve performance and reduce the deployment costs for inference. There are two main benefits of lower precision (INT8). First, the computation can be accelerated by lower precision instruction, like VNNI. Second, lower precision data types save memory bandwidth and allow for better cache locality and power savings. The new quantization approach can realize up to a 4x performance speedup in the latest [AWS* EC2 C5 instances](https://aws.amazon.com/blogs/aws/now-available-new-c5-instance-sizes-and-bare-metal-instances/) with [Intel Deep Learning Boost](https://www.intel.ai/intel-deep-learning-boost/) enabled hardware with less than 0.5% accuracy drop.
 
 ## Installation and Prerequisites
 
@@ -33,36 +33,7 @@ pip install mxnet-mkl --pre
 
 ## Image Classification Quantization Demo
 
-A new quantization script [imagenet_gen_qsym_mkldnn.py](https://github.com/apache/incubator-mxnet/blob/master/example/quantization/imagenet_gen_qsym_mkldnn.py) has been designed to launch quantization for image-classification models with Intel® MKL-DNN. This script integrates with [Gluon-CV modelzoo](https://gluon-cv.mxnet.io/model_zoo/classification.html), so that more pre-trained models can be downloaded from Gluon-CV and then converted for quantization. For details, you can refer [Model Quantization with Calibration Examples](https://github.com/apache/incubator-mxnet/blob/master/example/quantization/README.md). Below is a demo usage for ResNet50-V1 quantization.
-
-Use the following command to install [Gluon-CV](https://gluon-cv.mxnet.io/):
-
-```
-pip install gluoncv
-```
-
-The following command is to download the pre-trained model from Gluon-CV and transfer it into the symbolic model which would be finally quantized. The [validation dataset](http://data.mxnet.io/data/val_256_q90.rec) is available for testing the pre-trained models:
-
-```
-python imagenet_gen_qsym_mkldnn.py --model=resnet50_v1 --num-calib-batches=5 --calib-mode=naive
-```
-
-The model would be automatically replaced in fusion and quantization format. It is then saved as the quantized symbol and parameter files in the `./model` directory. The following command is to launch inference.
-
-```
-# USE MKLDNN AS SUBGRAPH BACKEND
-export MXNET_SUBGRAPH_BACKEND=MKLDNN
-
-# Launch FP32 Inference 
-python imagenet_inference.py --symbol-file=./model/resnet50_v1-symbol.json --param-file=./model/resnet50_v1-0000.params --rgb-mean=123.68,116.779,103.939 --rgb-std=58.393,57.12,57.375 --num-skipped-batches=50 --batch-size=64 --num-inference-batches=500 --dataset=./data/val_256_q90.rec --ctx=cpu
-
-# Launch INT8 Inference
-python imagenet_inference.py --symbol-file=./model/resnet50_v1-quantized-5batches-naive-symbol.json --param-file=./model/resnet50_v1-quantized-0000.params --rgb-mean=123.68,116.779,103.939 --rgb-std=58.393,57.12,57.375 --num-skipped-batches=50 --batch-size=64 --num-inference-batches=500 --dataset=./data/val_256_q90.rec --ctx=cpu
-
-# Launch dummy data Inference
-python imagenet_inference.py --symbol-file=./model/resnet50_v1-symbol.json --batch-size=64 --num-inference-batches=500 --ctx=cpu --benchmark=True
-python imagenet_inference.py --symbol-file=./model/resnet50_v1-quantized-5batches-naive-symbol.json --batch-size=64 --num-inference-batches=500 --ctx=cpu --benchmark=True
-```
+A new quantization script [imagenet_gen_qsym_mkldnn.py](https://github.com/apache/incubator-mxnet/blob/master/example/quantization/imagenet_gen_qsym_mkldnn.py) has been designed to launch quantization for image-classification models with Intel® MKL-DNN. This script integrates with [Gluon-CV modelzoo](https://gluon-cv.mxnet.io/model_zoo/classification.html), so that more pre-trained models can be downloaded from Gluon-CV and then converted for quantization. For details, you can refer [Model Quantization with Calibration Examples](https://github.com/apache/incubator-mxnet/blob/master/example/quantization/README.md).
 
 ## Integrate Quantization Flow to Your Project
 
@@ -70,7 +41,7 @@ It's important to note that the quantization flow only work with the symbolic MX
 
 ![quantization flow](quantization.png)
 
-Take Gluon ResNet50 as an example.
+Take Gluon ResNet18 as an example.
 
 ### Model Initialization
 
@@ -85,20 +56,28 @@ logger = logging.getLogger('logger')
 logger.setLevel(logging.INFO)
 
 batch_shape = (1, 3, 224, 224)
-resnet50 = vision.resnet50_v1(pretrained=True)
-resnet50.hybridize()
-resnet50.forward(mx.nd.zeros(batch_shape))
-resnet50.export('resnet50_v1')
-sym, arg_params, aux_params = mx.model.load_checkpoint('resnet50_v1', 0)
+resnet18 = vision.resnet18_v1(pretrained=True)
+resnet18.hybridize()
+resnet18.forward(mx.nd.zeros(batch_shape))
+resnet18.export('resnet18_v1')
+sym, arg_params, aux_params = mx.model.load_checkpoint('resnet18_v1', 0)
+# (optional) visualize float32 model
+mx.viz.plot_network(sym)
 ```
-First, we download ResNet50-v1 model from gluon modelzoo and export it as a symbol.
+First, we download resnet18-v1 model from gluon modelzoo and export it as a symbol. You can visualize float32 model. Below is a raw residual block.
+
+![float32 model](fp32_raw.png)
 
 ### Model Fusion
 
 ```python
 sym = sym.get_backend_symbol('MKLDNN_QUANTIZE')
+# (optional) visualize fused float32 model
+mx.viz.plot_network(sym)
 ```
-It's important to add this line to enable graph fusion before quantization to get better performance.
+It's important to add this line to enable graph fusion before quantization to get better performance. Below is a fused residual block. Batchnorm, Activation and elemwise_add are fused into Convolution.
+
+![float32 fused model](fp32_fusion.png)
 
 ### Quantize Model
 
@@ -121,19 +100,27 @@ calib_mode = 'none'
 calib_layer = None
 # set quantized_dtype
 quantized_dtype = 'auto'
-logger.info('Quantizing FP32 model ResNet50-V1')
+logger.info('Quantizing FP32 model Resnet18-V1')
 qsym, qarg_params, aux_params, collector = quantize_graph(sym=sym, arg_params=arg_params, aux_params=aux_params,
                                                           excluded_sym_names=excluded_names,
                                                           calib_mode=calib_mode, calib_layer=calib_layer,
                                                           quantized_dtype=quantized_dtype, logger=logger)
+# (optional) visualize quantized model
+mx.viz.plot_network(qsym)
+# save quantized model
+mx.model.save_checkpoint('quantized-resnet18_v1', 0, qsym, qarg_params, aux_params)
 ```
+
+Below is a quantized residual block without calibration. We can see `_contrib_requantize` operators are inserted ater `Convolution` without calibration information.
+
+![none calibrated model](none_calib.png)
 
 ### Evaluate/Tune INT8 Accuracy
 
 Now, you get a pair of quantized symbol and params file, you can load them for inference. If you want to use gluon for int8 inference. You can load them as a SymbolBlock:
 
 ```python
-quantized_net = mx.gluon.SymbolBlock.imports('quantized-resnet50_v1-symbol.json', 'data', 'quantized-resnet50_v1-0000.params')
+quantized_net = mx.gluon.SymbolBlock.imports('quantized-resnet18_v1-symbol.json', 'data', 'quantized-resnet18_v1-0000.params')
 quantized_net.hybridize(static_shape=True, static_alloc=True)
 batch_size = 1
 data = mx.nd.ones((batch_size,3,224,224))
@@ -156,11 +143,25 @@ calib_mode = 'naive'
 calib_layer = None
 # set quantized_dtype
 quantized_dtype = 'auto'
-logger.info('Quantizing FP32 model ResNet50-V1')
-qsym, qarg_params, aux_params, collector = quantize_graph(sym=sym, arg_params=arg_params, aux_params=aux_params,
+logger.info('Quantizing FP32 model resnet18-V1')
+cqsym, cqarg_params, aux_params, collector = quantize_graph(sym=sym, arg_params=arg_params, aux_params=aux_params,
                                                           excluded_sym_names=excluded_names,
                                                           calib_mode=calib_mode, calib_layer=calib_layer,
                                                           quantized_dtype=quantized_dtype, logger=logger)
+
+# download imagenet validation dataset
+mx.test_utils.download('http://data.mxnet.io/data/val_256_q90.rec', 'dataset.rec')
+# set rgb info for data
+mean_std = {'mean_r': 123.68, 'mean_g': 116.779, 'mean_b': 103.939, 'std_r': 58.393, 'std_g': 57.12, 'std_b': 57.375}
+# set batch size
+batch_size = 16
+# create DataIter
+data = mx.io.ImageRecordIter(path_imgrec='dataset.rec', batch_size=batch_size, data_shape=batch_shape[1:], rand_crop=False, rand_mirror=False, **mean_std)
+# create module
+mod = mx.mod.Module(symbol=sym, label_names=None, context=mx.cpu())
+mod.bind(for_training=False, data_shapes=data.provide_data, label_shapes=None)
+mod.set_params(arg_params, aux_params)
+
 # calibration configs
 # set num_calib_batches
 num_calib_batches = 5
@@ -183,21 +184,48 @@ After that, layer information will be filled into the `collector` returned by `q
 
 ```python
 # write scaling factor into quantized symbol
-qsym, qarg_params, aux_params = calib_graph(qsym=qsym, arg_params=arg_params, aux_params=aux_params,
+cqsym, cqarg_params, aux_params = calib_graph(qsym=cqsym, arg_params=arg_params, aux_params=aux_params,
                                             collector=collector, calib_mode=calib_mode,
                                             quantized_dtype=quantized_dtype, logger=logger)
+# (optional) visualize quantized model
+mx.viz.plot_network(cqsym)
 ```
+
+Below is a quantized residual block with naive calibration. We can see `min_calib_range` and `max_calib_range` are wrote into `_contrib_requantize` operators.
+
+![naive calibrated model](naive_calib.png)
 
 When you get a quantized model with calibration, keep sure to call fusion api again since this can fuse some `requantize` or `dequantize` operators for further performance improvement.
 
 ```python
 # perform post-quantization fusion
-qsym = qsym.get_backend_symbol('MKLDNN_QUANTIZE')
-# (optional) visualize quantized model
-mx.viz.plot_network(qsym)
+cqsym = cqsym.get_backend_symbol('MKLDNN_QUANTIZE')
+# (optional) visualize post-quantized model
+mx.viz.plot_network(cqsym)
 # save quantized model
-mx.model.save_checkpoint('quantized-resnet50_v1', 0, qsym, qarg_params, aux_params)
+mx.model.save_checkpoint('quantized-resnet18_v1', 0, cqsym, cqarg_params, aux_params)
 ```
+
+Below is a post-quantized residual block. We can see `_contrib_requantize` operators are fused into `Convolution` operators.
+
+![post-quantized model](post_quantize.png)
+
+BTW, You can also modify the `min_calib_range` and `max_calib_range` in the JSON file directly.
+
+```
+    {
+      "op": "_sg_mkldnn_conv", 
+      "name": "quantized_sg_mkldnn_conv_bn_act_6", 
+      "attrs": {
+        "max_calib_range": "3.562147", 
+        "min_calib_range": "0.000000", 
+        "quantized": "true", 
+        "with_act": "true", 
+        "with_bn": "true"
+      }, 
+......
+```
+
 ### Tips for Model Calibration
 
 #### Accuracy Tuning
@@ -215,3 +243,7 @@ mx.model.save_checkpoint('quantized-resnet50_v1', 0, qsym, qarg_params, aux_para
 - If lots of `requantize` layers exist, keep sure to perform post-quantization fusion after calibration;
 
 - Compare the MXNet profile or `MKLDNN_VERBOSE` of float32 and int8 inference;
+
+## Deploy with Python/C++
+
+MXNet also supports deploy quantized models with C++. Refer [MXNet C++ Package](https://github.com/apache/incubator-mxnet/blob/master/cpp-package/README.md) for more details.
