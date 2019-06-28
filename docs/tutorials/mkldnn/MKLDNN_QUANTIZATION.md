@@ -18,7 +18,7 @@
 
 # Quantize custom models for production-level inference with MKL-DNN backend
 
-The Apache MXNet* community delivered quantization approaches to improve performance and reduce the deployment costs for inference. There are two main benefits of lower precision (INT8). First, the computation can be accelerated by lower precision instruction, like VNNI. Second, lower precision data types save memory bandwidth and allow for better cache locality and power savings. The new quantization approach can realize up to a 4x performance speedup in the latest [AWS* EC2 C5 instances](https://aws.amazon.com/blogs/aws/now-available-new-c5-instance-sizes-and-bare-metal-instances/) with [Intel Deep Learning Boost](https://www.intel.ai/intel-deep-learning-boost/) enabled hardware with less than 0.5% accuracy drop.
+This doucument is to introduce how to quatize the FP32 model into INT8 precision for better accuracy and performance step by step, espeically for the customized models.
 
 ## Installation and Prerequisites
 
